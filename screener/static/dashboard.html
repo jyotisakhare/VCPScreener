@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minervini VCP Screener</title>
+<style>
+  /* Colour roles. Series blue/orange are categorical slots 1-2 (validated light + dark);
+     blue <-> red is the diverging pair used for reward vs risk. */
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --border: rgba(11,11,11,0.10);
+    --text: #0b0b0b; --text-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --deemph: #c3c2b7;
+    --series-1: #2a78d6; --series-2: #eb6834;
+    --reward: #2a78d6; --risk: #e34948;
+    --meter-fill: #2a78d6; --meter-track: #cde2fb;
+    --wash: rgba(11,11,11,0.04); --wash-strong: rgba(11,11,11,0.07);
+    --button: #0b0b0b; --button-text: #ffffff;
+    --shadow: 0 1px 2px rgba(11,11,11,0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --border: rgba(255,255,255,0.10);
+      --text: #ffffff; --text-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --deemph: #52514e;
+      --series-1: #3987e5; --series-2: #d95926;
+      --reward: #3987e5; --risk: #e66767;
+      --meter-fill: #3987e5; --meter-track: #0d366b;
+      --wash: rgba(255,255,255,0.05); --wash-strong: rgba(255,255,255,0.09);
+      --button: #ffffff; --button-text: #0b0b0b;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --border: rgba(255,255,255,0.10);
+    --text: #ffffff; --text-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --deemph: #52514e;
+    --series-1: #3987e5; --series-2: #d95926;
+    --reward: #3987e5; --risk: #e66767;
+    --meter-fill: #3987e5; --meter-track: #0d366b;
+    --wash: rgba(255,255,255,0.05); --wash-strong: rgba(255,255,255,0.09);
+    --button: #ffffff; --button-text: #0b0b0b;
+    --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 20px 24px 48px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  h1 { font-size: 18px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 14px; font-weight: 650; margin: 0; }
+  .sub { color: var(--text-2); font-size: 12.5px; }
+  .muted { color: var(--muted); }
+  .spacer { flex: 1; }
+  .badge { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+           border: 1px solid var(--border); color: var(--text-2); }
+  a { color: inherit; }
+
+  /* One filter row above everything it scopes */
+  .filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: 16px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field > span { font-size: 11.5px; color: var(--text-2); }
+  select, input[type=number] { font: inherit; color: var(--text); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; height: 36px; }
+  select { min-width: 230px; }
+  input[type=number] { width: 92px; }
+  .check { display: flex; align-items: center; gap: 6px; height: 36px; color: var(--text-2); font-size: 13px; }
+  button { font: inherit; cursor: pointer; border-radius: 8px; height: 36px; padding: 0 14px;
+           border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+  button:hover { background: var(--wash); }
+  button.primary { background: var(--button); color: var(--button-text); border-color: transparent; font-weight: 600; }
+  button.primary:hover { opacity: 0.88; }
+  button:disabled { opacity: 0.5; cursor: progress; }
+  :focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+          padding: 16px 18px; box-shadow: var(--shadow); }
+  .card-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .stack { display: grid; gap: 16px; }
+  /* grid children default to min-width:auto, which lets a wide table stretch the page */
+  .stack > *, .kpis > *, .plan > *, .detail-grid > *, .side > * { min-width: 0; }
+  /* Refetch keeps the frame: previous render held at reduced opacity, no skeleton */
+  #content.stale { opacity: 0.45; pointer-events: none; transition: opacity 120ms; }
+
+  .kpis { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 16px; }
+  .tile .label { font-size: 12.5px; color: var(--text-2); }
+  .tile .value { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+  .tile.hero .value { font-size: 52px; line-height: 1.05; }
+  .tile .note { font-size: 12.5px; color: var(--text-2); margin-top: 2px; }
+
+  .notice { border-left: 3px solid var(--axis); padding: 8px 12px; background: var(--wash);
+            border-radius: 0 8px 8px 0; font-size: 13px; color: var(--text-2); }
+  .notice strong { color: var(--text); }
+
+  .table-scroll { overflow-x: auto; margin: 0 -18px; padding: 0 18px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; font-weight: 500; font-size: 11.5px; color: var(--text-2);
+       padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--grid); vertical-align: middle; white-space: nowrap; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--wash); }
+  tbody tr[aria-selected=true] { background: var(--wash-strong); box-shadow: inset 3px 0 0 var(--text); }
+  tbody tr:last-child td { border-bottom: 0; }
+  .sym { font-weight: 650; }
+  .name { color: var(--text-2); font-size: 12px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600;
+          padding: 2px 8px; border-radius: 999px; border: 1px solid var(--axis); color: var(--text); }
+  .chip.solid { background: var(--text); color: var(--surface); border-color: transparent; }
+  .chip-note { font-size: 11.5px; color: var(--text-2); margin-left: 6px; }
+
+  .plan { display: grid; grid-template-columns: minmax(0, 1.7fr) repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .plan .tile { padding: 10px 12px; border: 1px solid var(--grid); border-radius: 10px; }
+  .plan .value { font-size: 19px; white-space: nowrap; }
+  .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+  .side { display: grid; gap: 18px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+  .legend i { display: inline-block; vertical-align: middle; margin-right: 6px; }
+  .legend .line { width: 16px; height: 2px; border-radius: 1px; }
+  .legend .box { width: 10px; height: 10px; border-radius: 2px; }
+  figure { margin: 0; }
+  .chart-host { overflow-x: auto; }
+  .depth { max-width: 300px; }
+  figcaption { font-size: 12.5px; color: var(--text-2); margin-bottom: 8px; }
+  figcaption strong { color: var(--text); font-weight: 650; }
+
+  .meter { display: grid; gap: 5px; }
+  .meter-head { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--text-2); }
+  .meter-head b { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .track { position: relative; height: 8px; border-radius: 4px; background: var(--meter-track); }
+  .fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--meter-fill); }
+  .limit { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text);
+           box-shadow: 0 0 0 2px var(--surface); }
+  .meter-foot { font-size: 11.5px; color: var(--muted); }
+
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 12.5px; margin: 0; }
+  .facts dt { color: var(--text-2); }
+  .facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .watch { display: flex; flex-wrap: wrap; gap: 6px; }
+  .watch span { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--wash); color: var(--text-2); }
+  .empty { padding: 28px 8px; text-align: center; color: var(--text-2); }
+  .empty strong { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+  .data-table { max-height: 280px; overflow: auto; margin-top: 10px; border: 1px solid var(--grid); border-radius: 8px; }
+  .data-table th { position: sticky; top: 0; background: var(--surface); }
+  .data-table tbody tr { cursor: default; }
+  .linkish { height: auto; padding: 0; border: 0; background: none; color: var(--text-2); font-size: 12.5px;
+             text-decoration: underline; text-underline-offset: 2px; }
+  .linkish:hover { background: none; color: var(--text); }
+  footer { margin-top: 20px; font-size: 12px; color: var(--muted); }
+
+  /* SVG marks are styled by class so both themes share one render */
+  svg { display: block; width: 100%; overflow: visible; }
+  svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+  svg text.ink { fill: var(--text); font-weight: 600; }
+  svg text.ink-2 { fill: var(--text-2); }
+  .tnum { font-variant-numeric: tabular-nums; }
+  .grid { stroke: var(--grid); stroke-width: 1; }
+  .axis { stroke: var(--axis); stroke-width: 1; }
+  .wick { stroke: var(--deemph); stroke-width: 1; }
+  .close-line { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .dot-1 { fill: var(--series-1); stroke: var(--surface); stroke-width: 2; }
+  .leg { stroke: var(--series-2); stroke-width: 2; stroke-linecap: round; }
+  .dot-2 { fill: var(--series-2); stroke: var(--surface); stroke-width: 2; }
+  .zone-reward { fill: var(--reward); opacity: 0.10; }
+  .zone-risk { fill: var(--risk); opacity: 0.10; }
+  .zone-entry { fill: var(--text); opacity: 0.14; }
+  .ref { stroke: var(--text-2); stroke-width: 1; }
+  .leader { stroke: var(--axis); stroke-width: 1; fill: none; }
+  .vol { fill: var(--deemph); }
+  .vol.hot { fill: var(--text-2); }
+  .avg { fill: none; stroke: var(--text); stroke-width: 1; opacity: 0.55; }
+  .crosshair { stroke: var(--text-2); stroke-width: 1; pointer-events: none; }
+  .bar { fill: var(--series-1); }
+  .bar:hover, .bar:focus { opacity: 0.78; outline: none; }
+  .lad-risk { stroke: var(--risk); stroke-width: 4; stroke-linecap: round; }
+  .lad-reward { stroke: var(--reward); stroke-width: 4; stroke-linecap: round; }
+  .lad-entry { fill: var(--text); stroke: var(--surface); stroke-width: 2; }
+  .lad-price { fill: var(--surface); stroke: var(--text); stroke-width: 2.5; }
+
+  #tooltip { position: fixed; z-index: 10; pointer-events: none; display: none; min-width: 150px;
+             background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+             box-shadow: 0 6px 24px rgba(0,0,0,0.16); padding: 8px 10px; font-size: 12px; }
+  #tooltip .tt-title { color: var(--text-2); margin-bottom: 4px; }
+  #tooltip .tt-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+  #tooltip .tt-row b { font-variant-numeric: tabular-nums; font-weight: 650; }
+  #tooltip .tt-row span { color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+  #tooltip .key { display: inline-block; width: 12px; height: 2px; border-radius: 1px; }
+
+  @media (max-width: 980px) {
+    .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .tile.hero { grid-column: 1 / -1; }
+    .plan { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .detail-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Minervini VCP Screener</h1>
+    <span id="demo-badge" class="badge" hidden>Demo data - synthetic, not real companies</span>
+    <span class="spacer"></span>
+    <a class="sub" href="/docs">API docs</a>
+    <button id="theme" type="button" aria-label="Switch between light and dark theme">Theme</button>
+  </header>
+
+  <form class="filters" id="filters">
+    <label class="field"><span>Index</span><select id="index" name="index"></select></label>
+    <label class="field"><span>Target (x risk)</span><input type="number" name="reward_to_risk" value="3" min="1" max="10" step="0.5"></label>
+    <label class="field"><span>Max risk %</span><input type="number" name="max_stop_pct" value="8" min="3.5" max="15" step="0.5"></label>
+    <label class="field"><span>Min RS rating</span><input type="number" name="min_rs_rating" value="70" min="0" max="99" step="5"></label>
+    <label class="field"><span>Max volume dry-up</span><input type="number" name="max_dry_up_ratio" value="0.7" min="0.1" max="2" step="0.05"></label>
+    <label class="check"><input type="checkbox" name="include_cheat_entries"> Include cheat entries</label>
+    <button class="primary" type="submit" id="run">Run screen</button>
+    <button type="button" id="refresh" title="Ignore the 15-minute cache and download fresh prices">Refresh data</button>
+  </form>
+
+  <div id="message"></div>
+  <div id="content" class="stack" hidden>
+    <div id="status" class="sub"></div>
+    <div id="notice"></div>
+    <section class="kpis" id="kpis" aria-label="Screening funnel"></section>
+    <section class="card">
+      <div class="card-head"><h2>Buyable setups</h2><span class="sub">Select a stock to see its chart. Breakouts first, then by relative strength.</span></div>
+      <div id="results"></div>
+    </section>
+    <section class="card" id="detail" hidden></section>
+    <section class="card">
+      <div class="card-head"><h2>Trend Template watchlist</h2><span class="sub">Stage-2 leaders with no pivot that is buyable within the risk limit today</span></div>
+      <div id="watchlist"></div>
+    </section>
+  </div>
+  <footer id="footer"></footer>
+</div>
+<div id="tooltip" role="status"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const SVG_NS = "http://www.w3.org/2000/svg";
+const state = { data: null, params: {}, selected: null, locale: "en-US" };
+
+// --- tiny DOM helpers. All data-derived text goes in through textContent. ---------------
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") node.className = v; else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v); else node.setAttribute(k, v);
+  }
+  for (const child of children.flat()) if (child != null) node.append(child);
+  return node;
+}
+function svg(tag, attrs = {}, ...children) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined) continue;
+    if (k === "text") node.textContent = v; else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v);
+  }
+  for (const child of children.flat()) if (child != null) node.append(child);
+  return node;
+}
+const price = (v) => v == null ? "-" : v.toLocaleString(state.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const num = (v, d = 0) => v == null ? "-" : v.toLocaleString(state.locale, { minimumFractionDigits: d, maximumFractionDigits: d });
+const compact = (v) => v == null ? "-" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(v);
+const pct = (v, d = 1) => v == null ? "-" : `${v > 0 ? "+" : ""}${v.toFixed(d)}%`;
+const day = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+const shortDay = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+
+// --- tooltip ---------------------------------------------------------------------------------
+const tooltip = $("tooltip");
+function showTooltip(evtOrRect, title, rows) {
+  tooltip.replaceChildren(el("div", { class: "tt-title", text: title }));
+  for (const [label, value, keyColor] of rows) {
+    const name = el("span", {}, keyColor ? el("i", { class: "key", style: `background:${keyColor}` }) : null, label);
+    tooltip.append(el("div", { class: "tt-row" }, name, el("b", { text: value })));  // value leads visually (bold)
+  }
+  tooltip.style.display = "block";
+  const x = evtOrRect.clientX ?? evtOrRect.left + evtOrRect.width / 2;
+  const y = evtOrRect.clientY ?? evtOrRect.top;
+  const box = tooltip.getBoundingClientRect();
+  tooltip.style.left = Math.min(window.innerWidth - box.width - 8, Math.max(8, x + 14)) + "px";
+  tooltip.style.top = Math.max(8, y - box.height - 12) + "px";
+}
+const hideTooltip = () => { tooltip.style.display = "none"; };
+
+// --- data --------------------------------------------------------------------------------------
+async function loadIndices() {
+  const indices = await (await fetch("/api/v1/indices")).json();
+  const groups = { IN: el("optgroup", { label: "India (NSE)" }), US: el("optgroup", { label: "United States" }) };
+  for (const i of indices) (groups[i.market] ?? groups.US).append(el("option", { value: i.key, text: i.name }));
+  $("index").append(groups.IN, groups.US);
+  const saved = localStorage.getItem("screener.index");
+  if (saved && indices.some((i) => i.key === saved)) $("index").value = saved;
+}
+
+function readParams(refresh) {
+  const form = new FormData($("filters"));
+  const params = { include_chart: "true" };
+  for (const [k, v] of form.entries()) params[k] = k === "include_cheat_entries" ? "true" : v;
+  if (refresh) params.refresh = "true";
+  return params;
+}
+
+async function run(refresh = false) {
+  const params = readParams(refresh);
+  localStorage.setItem("screener.index", params.index);
+  $("run").disabled = $("refresh").disabled = true;
+  $("run").textContent = "Screening...";
+  $("content").classList.add("stale");
+  $("message").replaceChildren();
+  try {
+    const resp = await fetch("/api/v1/screen?" + new URLSearchParams(params));
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail));
+    state.data = body; state.params = params; state.locale = body.market === "IN" ? "en-IN" : "en-US";
+    const keep = body.results.find((r) => r.ticker === state.selected);
+    state.selected = (keep ?? body.results[0])?.ticker ?? null;
+    render();
+  } catch (err) {
+    $("message").replaceChildren(el("div", { class: "notice", role: "alert" },
+      el("strong", { text: "The screen could not run. " }), String(err.message || err)));
+    if (!state.data) $("content").hidden = true;
+  } finally {
+    $("content").classList.remove("stale");
+    $("run").disabled = $("refresh").disabled = false;
+    $("run").textContent = "Run screen";
+  }
+}
+
+// --- rendering ---------------------------------------------------------------------------------
+function render() {
+  const d = state.data;
+  $("content").hidden = false;
+  $("status").textContent = `${d.index_name} - daily candles up to ${d.as_of ? day(d.as_of) : "n/a"}`;
+  $("notice").replaceChildren(d.incomplete_session_excluded ? el("div", { class: "notice" },
+    el("strong", { text: "Market still open. " }),
+    `Today's partial candle (${day(d.incomplete_session_excluded)}) is ignored; results are as of the last completed session.`) : "");
+  renderKpis(d); renderResults(d); renderDetail(); renderWatchlist(d);
+  $("footer").textContent = d.disclaimer;
+}
+
+function renderKpis(d) {
+  const s = d.summary;
+  const breakouts = d.results.filter((r) => r.status === "BREAKOUT").length;
+  const tile = (label, value, note, hero) => el("div", { class: "card tile" + (hero ? " hero" : "") },
+    el("div", { class: "label", text: label }), el("div", { class: "value", text: value }), el("div", { class: "note", text: note }));
+  const share = (a, b) => b ? `${Math.round((a / b) * 100)}% of ${num(b)}` : "";
+  $("kpis").replaceChildren(
+    tile("Buyable setups today", num(s.actionable_vcp),
+      s.actionable_vcp ? `${breakouts} breakout${breakouts === 1 ? "" : "s"}, ${s.actionable_vcp - breakouts} waiting under the pivot` : "Nothing meets every rule right now", true),
+    tile("Index constituents", num(s.constituents), "screened"),
+    tile("With price data", num(s.with_price_data), share(s.with_price_data, s.constituents)),
+    tile("Pass Trend Template", num(s.passed_trend_template), share(s.passed_trend_template, s.with_price_data) + " in a stage-2 uptrend"));
+}
+
+function renderResults(d) {
+  if (!d.results.length) {
+    $("results").replaceChildren(el("div", { class: "empty" }, el("strong", { text: "No buyable setups in this index today" }),
+      "That is normal: tight, low-risk pivots are rare. Try a broader index, or loosen “Max volume dry-up” to 0.85."));
+    return;
+  }
+  const head = ["Stock", "Status", "Price", "Entry range", "Stop-loss", "Target", "Risk", "RS", "Pattern", "Stop → entry → target"];
+  const numeric = new Set([2, 3, 4, 5, 6, 7]);
+  const rows = d.results.map((r) => {
+    const select = () => { state.selected = r.ticker; renderResults(state.data); renderDetail(); };
+    const chip = el("span", { class: "chip" + (r.status === "BREAKOUT" ? " solid" : ""), text: r.status === "BREAKOUT" ? "Breakout" : "Setup" });
+    const note = r.status === "BREAKOUT" ? (r.vcp.breakout_volume_confirmed ? "volume confirmed" : "light volume")
+               : r.entry_type !== "PIVOT" ? "cheat entry" : "";
+    return el("tr", { tabindex: 0, "aria-selected": r.ticker === state.selected, onclick: select,
+                      onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(); } } },
+      el("td", {}, el("div", { class: "sym", text: r.symbol }), el("div", { class: "name", text: r.name })),
+      el("td", {}, chip, note ? el("span", { class: "chip-note", text: note }) : null),
+      el("td", { class: "num", text: price(r.current_price) }),
+      el("td", { class: "num", text: `${price(r.entry_range.low)} – ${price(r.entry_range.high)}` }),
+      el("td", { class: "num", text: price(r.stop_loss) }),
+      el("td", { class: "num", text: price(r.target) }),
+      el("td", { class: "num", text: `${r.risk_pct.toFixed(1)}%` }),
+      el("td", { class: "num", text: num(r.rs_rating) }),
+      el("td", { text: r.vcp.footprint }),
+      el("td", {}, ladder(r)));
+  });
+  $("results").replaceChildren(el("div", { class: "table-scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, head.map((h, i) => el("th", { class: numeric.has(i) ? "num" : "", text: h })))),
+    el("tbody", {}, rows))));
+}
+
+// Row mini-chart: stop ... entry band ... target on one scale, with the current price.
+function ladder(r) {
+  const W = 190, H = 26, pad = 8, y = H / 2;
+  const lo = Math.min(r.stop_loss, r.current_price), hi = Math.max(r.target, r.current_price);
+  const x = (v) => pad + ((v - lo) / (hi - lo)) * (W - 2 * pad);
+  const label = `Stop ${price(r.stop_loss)}, entry ${price(r.entry_range.low)} to ${price(r.entry_range.high)}, target ${price(r.target)}, price ${price(r.current_price)}`;
+  const node = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": label, style: `width:${W}px;height:${H}px` },
+    svg("line", { class: "lad-risk", x1: x(r.stop_loss), x2: x(r.entry_range.low) - 3, y1: y, y2: y }),
+    svg("line", { class: "lad-reward", x1: x(r.entry_range.high) + 3, x2: x(r.target), y1: y, y2: y }),
+    svg("rect", { class: "lad-entry", x: x(r.entry_range.low), y: y - 6, width: Math.max(4, x(r.entry_range.high) - x(r.entry_range.low)), height: 12, rx: 2 }),
+    svg("circle", { class: "lad-price", cx: x(r.current_price), cy: y, r: 4 }));
+  node.addEventListener("pointermove", (e) => showTooltip(e, r.symbol, [
+    ["Target", price(r.target), "var(--reward)"], ["Entry", `${price(r.entry_range.low)} – ${price(r.entry_range.high)}`, "var(--text)"],
+    ["Price", price(r.current_price)], ["Stop-loss", price(r.stop_loss), "var(--risk)"]]));
+  node.addEventListener("pointerleave", hideTooltip);
+  return node;
+}
+
+function renderWatchlist(d) {
+  $("watchlist").replaceChildren(d.trend_template_watchlist.length
+    ? el("div", { class: "watch" }, d.trend_template_watchlist.map((s) => el("span", { text: s })))
+    : el("div", { class: "sub", text: "None." }));
+}
+
+function renderDetail() {
+  const r = state.data?.results.find((x) => x.ticker === state.selected);
+  const box = $("detail");
+  box.hidden = !r;
+  if (!r) return;
+  const tile = (label, value, note) => el("div", { class: "tile" }, el("div", { class: "label", text: label }),
+    el("div", { class: "value", text: value }), note ? el("div", { class: "note", text: note }) : null);
+  const action = r.status === "BREAKOUT"
+    ? `Closed above the pivot ${r.vcp.breakout_bars_ago === 0 ? "in the last session" : r.vcp.breakout_bars_ago + " sessions ago"}; still inside the buyable range.`
+    : `Waiting ${Math.abs(r.pct_from_pivot).toFixed(1)}% under the pivot. Buy only as it trades through ${price(r.entry_range.low)}.`;
+
+  const chartHost = el("div", { class: "chart-host" });
+  const tableHost = el("div");
+  const toggle = el("button", { class: "linkish", type: "button", "aria-expanded": "false", text: "Show data table",
+    onclick: () => {
+      const open = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", String(!open));
+      toggle.textContent = open ? "Show data table" : "Hide data table";
+      tableHost.replaceChildren(open ? "" : dataTable(r.chart));
+    } });
+
+  box.replaceChildren(
+    el("div", { class: "card-head" }, el("h2", { text: `${r.symbol} - ${r.name}` }),
+      el("span", { class: "sub", text: [r.sector, action].filter(Boolean).join(" · ") })),
+    el("div", { class: "plan" },
+      tile("Entry range", `${price(r.entry_range.low)} – ${price(r.entry_range.high)}`, "pivot to highest buyable price"),
+      tile("Stop-loss", price(r.stop_loss), r.stop_basis),
+      tile("Target", price(r.target), `${r.reward_to_risk}x risk`),
+      tile("Risk", `${r.risk_pct.toFixed(2)}%`, `from ${price(r.reference_entry)}; ${r.max_risk_pct.toFixed(1)}% at top of range`),
+      tile("Reward", `${r.reward_pct.toFixed(2)}%`, "to target"),
+      tile("Current price", price(r.current_price), `${pct(r.pct_from_pivot)} vs pivot`)),
+    el("div", { class: "detail-grid" },
+      el("figure", {},
+        el("figcaption", {}, el("strong", { text: "Price and volume " }), `${r.vcp.footprint} - ${r.vcp.base_weeks}-week base from ${day(r.vcp.base_start)}`),
+        el("div", { class: "legend" },
+          el("span", {}, el("i", { class: "line", style: "background:var(--series-1)" }), "Close (grey bars: daily high-low)"),
+          el("span", {}, el("i", { class: "line", style: "background:var(--series-2)" }), "Contractions (high to low)"),
+          el("span", {}, el("i", { class: "box", style: "background:var(--text-2)" }), "Volume in the 10-session dry-up window")),
+        chartHost, toggle, tableHost),
+      el("div", { class: "side" },
+        el("figure", {}, el("figcaption", {}, el("strong", { text: "Contraction depth " }), "each pullback shallower than the last"), depthBars(r)),
+        meter("Volume dry-up", r.vcp.volume_dry_up_ratio.toFixed(2) + "x", r.vcp.volume_dry_up_ratio, 1.2,
+          Number(state.params.max_dry_up_ratio ?? 0.7), (v) => `max ${v.toFixed(2)}x of 50-day average`),
+        meter("RS rating", num(r.rs_rating), r.rs_rating, 99, Number(state.params.min_rs_rating ?? 70), (v) => `min ${v} (percentile within the index)`),
+        meter("Pivot height in base", r.vcp.pivot_position_pct.toFixed(0) + "%", r.vcp.pivot_position_pct, 100, 66.7, () => "upper third = standard pivot"),
+        el("dl", { class: "facts" },
+          el("dt", { text: "Below 52-week high" }), el("dd", { text: `${r.pct_below_52w_high.toFixed(1)}%` }),
+          el("dt", { text: "Quietest session" }), el("dd", { text: `${r.vcp.quietest_day_ratio.toFixed(2)}x average` }),
+          el("dt", { text: "Entry type" }), el("dd", { text: r.entry_type === "PIVOT" ? "Standard pivot" : r.entry_type === "CHEAT" ? "Cheat (mid-base)" : "Low cheat" }),
+          r.vcp.breakout_volume_ratio != null ? [el("dt", { text: "Breakout volume" }), el("dd", { text: `${r.vcp.breakout_volume_ratio.toFixed(2)}x average` })] : null))));
+  if (r.chart) { drawPriceChart(chartHost, r); new ResizeObserver(() => drawPriceChart(chartHost, r)).observe(chartHost); }
+}
+
+function meter(label, valueText, value, max, limit, limitText) {
+  const clamp = (v) => Math.max(0, Math.min(100, (v / max) * 100));
+  return el("div", { class: "meter", role: "img", "aria-label": `${label} ${valueText}, ${limitText(limit)}` },
+    el("div", { class: "meter-head" }, el("span", { text: label }), el("b", { text: valueText })),
+    el("div", { class: "track" }, el("div", { class: "fill", style: `width:${clamp(value)}%` }), el("div", { class: "limit", style: `left:calc(${clamp(limit)}% - 1px)` })),
+    el("div", { class: "meter-foot", text: limitText(limit) }));
+}
+
+function depthBars(r) {
+  const c = r.vcp.contractions, W = 300, H = 150, top = 22, base = H - 22, slot = Math.min(64, (W - 20) / c.length), bw = 24;
+  const max = Math.max(...c.map((x) => x.depth_pct));
+  const node = svg("svg", { class: "depth", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Contraction depths: " + c.map((x) => x.depth_pct.toFixed(0) + "%").join(", ") });
+  c.forEach((x, i) => {
+    const cx = 10 + slot * i + slot / 2, h = Math.max(3, (x.depth_pct / max) * (base - top)), y = base - h;
+    // column: 4px rounded data-end, square at the baseline
+    const d = `M${cx - bw / 2},${base} V${y + 4} Q${cx - bw / 2},${y} ${cx - bw / 2 + 4},${y} H${cx + bw / 2 - 4} Q${cx + bw / 2},${y} ${cx + bw / 2},${y + 4} V${base} Z`;
+    const tip = (e) => showTooltip(e.clientX ? e : e.target.getBoundingClientRect(), `Contraction ${i + 1}`, [
+      ["Depth", x.depth_pct.toFixed(1) + "%", "var(--series-1)"], ["High", `${price(x.high)} on ${shortDay(x.high_date)}`], ["Low", `${price(x.low)} on ${shortDay(x.low_date)}`]]);
+    node.append(svg("path", { class: "bar", d, tabindex: 0, onpointermove: tip, onpointerleave: hideTooltip, onfocus: tip, onblur: hideTooltip }),
+      svg("text", { class: "ink tnum", x: cx, y: y - 6, "text-anchor": "middle", text: x.depth_pct.toFixed(0) + "%" }),
+      svg("text", { x: cx, y: H - 6, "text-anchor": "middle", text: "T" + (i + 1) }));
+  });
+  node.append(svg("line", { class: "axis", x1: 4, x2: 10 + slot * c.length + 6, y1: base + 0.5, y2: base + 0.5 }));
+  return node;
+}
+
+function niceTicks(lo, hi, count) {
+  const raw = (hi - lo) / count, mag = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 2.5, 5, 10].find((m) => m * mag >= raw) * mag;
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) out.push(v);
+  return out;
+}
+
+function drawPriceChart(host, r) {
+  const c = r.chart, n = c.dates.length, FUTURE = 16;
+  const W = Math.max(420, host.clientWidth || 800), L = 56, R = 138, T = 12, PH = 300, GAP = 22, VH = 70, XB = 24;
+  const H = T + PH + GAP + VH + XB, plotW = W - L - R, step = plotW / (n + FUTURE);
+  const x = (i) => L + (i + 0.5) * step;
+  const lo = Math.min(...c.low, r.stop_loss) * 0.985, hi = Math.max(...c.high, r.target) * 1.015;
+  const y = (v) => T + PH - ((v - lo) / (hi - lo)) * PH;
+  const vTop = T + PH + GAP, vMax = Math.max(...c.volume) * 1.05, vy = (v) => vTop + VH - (v / vMax) * VH;
+  const at = new Map(c.dates.map((d, i) => [d, i]));
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, style: `height:${H}px`, tabindex: 0, role: "img",
+    "aria-label": `${r.symbol} daily closes with contractions, entry zone, stop and target. Use left and right arrow keys to read values.` });
+
+  // grid + y axis (clean round ticks)
+  for (const t of niceTicks(lo, hi, 5)) root.append(svg("line", { class: "grid", x1: L, x2: W - R, y1: y(t), y2: y(t) }),
+    svg("text", { class: "tnum", x: L - 8, y: y(t) + 4, "text-anchor": "end", text: num(t, t < 100 ? 1 : 0) }));
+  // x axis: month starts
+  let lastMonth = null;
+  c.dates.forEach((d, i) => { const m = d.slice(0, 7); if (m !== lastMonth && i > 0) {
+      root.append(svg("line", { class: "grid", x1: x(i) - step / 2, x2: x(i) - step / 2, y1: T, y2: vTop + VH }),
+        svg("text", { x: x(i) - step / 2 + 4, y: H - 8, text: new Date(d + "T00:00:00").toLocaleDateString("en-GB", { month: "short", year: d.slice(5, 7) === "01" ? "2-digit" : undefined }) })); }
+    lastMonth = m; });
+
+  // trade-plan zones live to the right of the pivot, running into the empty "future" gutter
+  const last = r.vcp.contractions[r.vcp.contractions.length - 1];
+  const zx = x(at.get(last.high_date) ?? n - 1), zw = W - R - zx;
+  root.append(svg("rect", { class: "zone-reward", x: zx, width: zw, y: y(r.target), height: y(r.entry_range.low) - y(r.target) }),
+    svg("rect", { class: "zone-risk", x: zx, width: zw, y: y(r.entry_range.low), height: y(r.stop_loss) - y(r.entry_range.low) }),
+    svg("rect", { class: "zone-entry", x: zx, width: zw, y: y(r.entry_range.high), height: y(r.entry_range.low) - y(r.entry_range.high) }));
+  for (const v of [r.target, r.stop_loss]) root.append(svg("line", { class: "ref", x1: zx, x2: W - R, y1: y(v), y2: y(v) }));
+
+  // daily high-low range, then the close line on top
+  c.dates.forEach((_, i) => root.append(svg("line", { class: "wick", x1: x(i), x2: x(i), y1: y(c.high[i]), y2: y(c.low[i]) })));
+  root.append(svg("path", { class: "close-line", d: c.close.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("") }));
+
+  // contraction legs with a depth label at each low
+  r.vcp.contractions.forEach((k) => {
+    const a = at.get(k.high_date), b = at.get(k.low_date);
+    if (a == null || b == null) return;
+    root.append(svg("line", { class: "leg", x1: x(a), y1: y(k.high), x2: x(b), y2: y(k.low) }),
+      svg("circle", { class: "dot-2", cx: x(a), cy: y(k.high), r: 4 }), svg("circle", { class: "dot-2", cx: x(b), cy: y(k.low), r: 4 }),
+      svg("text", { class: "ink tnum", x: x(b), y: y(k.low) + 17, "text-anchor": "middle", text: `−${k.depth_pct.toFixed(0)}%` }));
+  });
+  root.append(svg("circle", { class: "dot-1", cx: x(n - 1), cy: y(c.close[n - 1]), r: 4 }));
+
+  // right-hand labels for the plan levels, pushed apart when they would collide
+  const labels = [
+    { v: r.target, name: "Target", text: price(r.target) },
+    { v: (r.entry_range.low + r.entry_range.high) / 2, name: "Entry zone", text: `${price(r.entry_range.low)}–${price(r.entry_range.high)}` },
+    { v: r.stop_loss, name: "Stop-loss", text: price(r.stop_loss) },
+  ].map((l) => ({ ...l, line: y(l.v), pos: y(l.v) })).sort((a, b) => a.pos - b.pos);
+  const MIN = 30;
+  for (let i = 1; i < labels.length; i++) labels[i].pos = Math.max(labels[i].pos, labels[i - 1].pos + MIN);
+  for (let i = labels.length - 2; i >= 0; i--) labels[i].pos = Math.min(labels[i].pos, labels[i + 1].pos - MIN);
+  for (const l of labels) root.append(
+    svg("path", { class: "leader", d: `M${W - R},${l.line} L${W - R + 8},${l.pos}` }),
+    svg("text", { x: W - R + 12, y: l.pos - 2, text: l.name }),
+    svg("text", { class: "ink tnum", x: W - R + 12, y: l.pos + 11, text: l.text }));
+
+  // volume panel (its own scale and baseline - never a second axis on the price plot)
+  const hotEnd = n - (r.vcp.breakout_bars_ago != null ? r.vcp.breakout_bars_ago + 1 : 0), bw = Math.max(1, Math.min(24, step - 2));
+  c.volume.forEach((v, i) => root.append(svg("rect", { class: "vol" + (i >= hotEnd - 10 && i < hotEnd ? " hot" : ""), x: x(i) - bw / 2, width: bw, y: vy(v), height: vTop + VH - vy(v) })));
+  const avgPath = c.volume_avg_50.map((v, i) => v == null ? "" : `${i && c.volume_avg_50[i - 1] != null ? "L" : "M"}${x(i).toFixed(1)},${vy(v).toFixed(1)}`).join("");
+  const lastAvg = c.volume_avg_50[n - 1];
+  root.append(svg("path", { class: "avg", d: avgPath }), svg("line", { class: "axis", x1: L, x2: W - R, y1: vTop + VH + 0.5, y2: vTop + VH + 0.5 }),
+    svg("text", { class: "ink-2", x: L, y: vTop - 6, text: "Volume" }),
+    svg("text", { class: "tnum", x: L - 8, y: vy(vMax / 1.05) + 8, "text-anchor": "end", text: compact(vMax / 1.05) }),
+    lastAvg != null ? svg("text", { x: W - R + 12, y: vy(lastAvg) + 4, text: "50-day average" }) : null);
+
+  // hover layer: crosshair snaps to the nearest session; arrow keys do the same
+  const cross = svg("line", { class: "crosshair", y1: T, y2: vTop + VH, visibility: "hidden" });
+  const marker = svg("circle", { class: "dot-1", r: 4, visibility: "hidden" });
+  root.append(cross, marker);
+  let cursor = n - 1;
+  const point = (i, evt) => {
+    cursor = Math.max(0, Math.min(n - 1, i));
+    cross.setAttribute("x1", x(cursor)); cross.setAttribute("x2", x(cursor)); cross.setAttribute("visibility", "visible");
+    marker.setAttribute("cx", x(cursor)); marker.setAttribute("cy", y(c.close[cursor])); marker.setAttribute("visibility", "visible");
+    const box = root.getBoundingClientRect(), avg = c.volume_avg_50[cursor];
+    const where = evt ?? { clientX: box.left + (x(cursor) / W) * box.width, clientY: box.top + (y(c.close[cursor]) / H) * box.height };
+    showTooltip(where, day(c.dates[cursor]), [["Close", price(c.close[cursor]), "var(--series-1)"], ["High", price(c.high[cursor])], ["Low", price(c.low[cursor])],
+      ["Volume", compact(c.volume[cursor])], ["vs 50-day avg", avg ? (c.volume[cursor] / avg).toFixed(2) + "x" : "-"]]);
+  };
+  const leave = () => { cross.setAttribute("visibility", "hidden"); marker.setAttribute("visibility", "hidden"); hideTooltip(); };
+  root.append(svg("rect", { x: L, y: T, width: plotW, height: vTop + VH - T, fill: "transparent",
+    onpointermove: (e) => { const box = root.getBoundingClientRect(); point(Math.round(((e.clientX - box.left) / box.width * W - L) / step - 0.5), e); },
+    onpointerleave: leave }));
+  root.addEventListener("keydown", (e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); point(cursor + (e.key === "ArrowLeft" ? -1 : 1)); } });
+  root.addEventListener("focus", () => point(cursor)); root.addEventListener("blur", leave);
+  host.replaceChildren(root);
+}
+
+function dataTable(c) {
+  const rows = c.dates.map((d, i) => el("tr", {}, el("td", { text: day(d) }), ...[c.open[i], c.high[i], c.low[i], c.close[i]].map((v) => el("td", { class: "num", text: price(v) })),
+    el("td", { class: "num", text: num(c.volume[i]) }))).reverse();
+  return el("div", { class: "data-table" }, el("table", {},
+    el("thead", {}, el("tr", {}, ["Date", "Open", "High", "Low", "Close", "Volume"].map((h, i) => el("th", { class: i ? "num" : "", text: h })))), el("tbody", {}, rows)));
+}
+
+// --- wiring --------------------------------------------------------------------------------------
+$("filters").addEventListener("submit", (e) => { e.preventDefault(); run(); });
+$("index").addEventListener("change", () => run());
+$("refresh").addEventListener("click", () => run(true));
+$("theme").addEventListener("click", () => {
+  const dark = document.documentElement.dataset.theme
+    ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = dark ? "light" : "dark";
+});
+(async () => {
+  const query = new URLSearchParams(location.search);
+  if (["light", "dark"].includes(query.get("theme"))) document.documentElement.dataset.theme = query.get("theme");
+  try {
+    const health = await (await fetch("/health")).json();
+    $("demo-badge").hidden = !health.demo;
+    await loadIndices();
+    const wanted = query.get("index");
+    if (wanted) $("index").value = wanted;
+    run();
+  } catch (err) {
+    $("message").replaceChildren(el("div", { class: "notice", role: "alert", text: "Could not reach the API: " + err }));
+  }
+})();
+</script>
+</body>
+</html>

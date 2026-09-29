@@ -1,0 +1,34 @@
+[project]
+name = "minervini-screener"
+version = "0.1.0"
+description = "Stock screener API based on Mark Minervini's Trend Template and Volatility Contraction Pattern (VCP)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "yfinance>=0.2.65",
+    "requests>=2.32",
+    "lxml>=5.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+minervini-screener = "screener.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["screener"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
